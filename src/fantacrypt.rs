@@ -3,11 +3,19 @@ const CRYPT_CONST_2: u32 = 32618;
 const CRYPT_KEY: u32 = 5;
 
 fn fanta_encrypt(data: &str) -> String {
-    data.chars().fold((String::with_capacity(data.len() / 2), CRYPT_KEY), |(mut s, key), c| {
-        let val = (c as u32)^((key & 0xffff) >> 8);
-        s.push_str(&format!("{:X}", val));
-        (s, ((val + key).wrapping_mul(CRYPT_CONST_1)).wrapping_add(CRYPT_CONST_2))
-    }).0
+    data.chars()
+        .fold(
+            (String::with_capacity(data.len() / 2), CRYPT_KEY),
+            |(mut s, key), c| {
+                let val = (c as u32) ^ ((key & 0xffff) >> 8);
+                s.push_str(&format!("{:X}", val));
+                (
+                    s,
+                    ((val + key).wrapping_mul(CRYPT_CONST_1)).wrapping_add(CRYPT_CONST_2),
+                )
+            },
+        )
+        .0
 }
 
 fn fanta_decrypt(data: &str) -> String {
@@ -19,7 +27,7 @@ fn fanta_decrypt(data: &str) -> String {
         let val = byte as u32 ^ ((key & 0xffff) >> 8);
         ret.push(val as u8 as char);
         key = ((byte as u32 + key) * CRYPT_CONST_1) + CRYPT_CONST_2
-    };
+    }
     ret
 }
 

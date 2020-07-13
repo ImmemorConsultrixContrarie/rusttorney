@@ -9,6 +9,6 @@ edition = "2018"
 
 [dependencies]
 hex = "0.4.2"
-tokio = { version = "0.2.21", features = ["tcp", "macros"] }
+tokio = { version = "0.2.21", features = ["tcp", "macros", "io-util", "stream"] }
 serde = { version = "1.0.114", features = ["derive"] }
 toml = "0.5.6"
