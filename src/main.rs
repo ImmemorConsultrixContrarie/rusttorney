@@ -1,0 +1,5 @@
+mod fantacrypt;
+
+fn main() {
+
+}
