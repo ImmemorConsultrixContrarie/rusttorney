@@ -1,4 +1,3 @@
-mod fantacrypt;
 mod config;
 
 #[tokio::main]
