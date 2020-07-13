@@ -1,40 +1,41 @@
+use once_cell::sync::OnceCell;
 use serde::Deserialize;
 
+pub static CONFIG: OnceCell<Config> = OnceCell::new();
+
 #[derive(Deserialize)]
-pub struct Config<'a> {
+pub struct Config {
     pub debug: bool,
     pub timeout: u32,
     pub multiclient_limit: u8,
     pub max_chars: u32,
     pub zalgo_tolerance: u8,
-    #[serde(borrow)]
-    pub general: GeneraConfig<'a>,
-    #[serde(borrow)]
-    pub masterserver: MasterServerConfig<'a>,
+    pub general: GeneralConfig,
+    pub masterserver: MasterServerConfig,
     pub wtce_floodguard: FloodGuardConfig,
     pub music_change_floodguard: FloodGuardConfig,
 }
 
 #[derive(Deserialize)]
-pub struct GeneraConfig<'a> {
-    pub hostname: &'a str,
+pub struct GeneralConfig {
+    pub hostname: String,
     pub playerlimit: u8,
     pub port: u32,
     pub local: bool,
-    pub modpass: &'a str,
-    pub motd: &'a str,
+    pub modpass: String,
+    pub motd: String,
     pub use_websockets: bool,
     pub websocket_port: u32,
 }
 
 #[derive(Deserialize)]
-pub struct MasterServerConfig<'a> {
+pub struct MasterServerConfig {
     #[serde(rename = "use")]
     pub use_masterserver: bool,
-    pub ip: &'a str,
+    pub ip: String,
     pub port: u32,
-    pub name: &'a str,
-    pub description: &'a str,
+    pub name: String,
+    pub description: String,
 }
 
 #[derive(Deserialize)]
@@ -50,7 +51,8 @@ mod tests {
 
     #[test]
     fn test_config_parsing() {
-        let config_str = std::fs::read_to_string("./config/config.toml").unwrap();
+        let config_str =
+            std::fs::read_to_string("./config/config.toml").unwrap();
         let config: Config = toml::from_str(&config_str).unwrap();
 
         assert_eq!(config.debug, false);
