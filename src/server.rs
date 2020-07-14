@@ -142,7 +142,7 @@ impl Decoder for AOMessageCodec {
 
         args.remove(end_header_index);
 
-        Ok(Some(AOMessage { command, args: vec![] }))
+        Ok(Some(AOMessage { command, args }))
     }
 }
 
