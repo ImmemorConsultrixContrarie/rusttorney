@@ -1,2 +1,1 @@
-mod fantacrypt;
 mod config;
