@@ -1,4 +1,4 @@
-debug = true
+debug = false
 timeout = 250
 multiclient_limit = 16
 max_chars = 256
