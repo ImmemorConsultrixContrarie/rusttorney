@@ -11,7 +11,11 @@ async fn main() -> anyhow::Result<()> {
     let level_filter;
 
     if CONFIG.get().unwrap().debug {
-        level_filter = LevelFilter::Debug
+        if let Ok(log_filt) = std::env::var("RUST_LOG") {
+            level_filter = log_filt.parse()?;
+        } else {
+            level_filter = LevelFilter::Debug
+        }
     } else {
         level_filter = LevelFilter::Info
     }

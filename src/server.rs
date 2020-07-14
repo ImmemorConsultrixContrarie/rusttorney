@@ -6,6 +6,7 @@ use tokio::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
 };
 
+#[derive(Debug)]
 pub enum Command {
     Handshake,          // HI
     ClientVersion,      // ID
@@ -33,15 +34,53 @@ pub enum Command {
     BanWithGuard,       // opBAN
 }
 
+impl FromStr for Command {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use Command::*;
+        match s {
+            "HI" => Ok(Handshake),
+            "ID" => Ok(ClientVersion),
+            "CH" => Ok(KeepAlive),
+            "askchaa" => Ok(AskListLengths),
+            "askchar" => Ok(AskListCharacters),
+            "AN" => Ok(CharacterList),
+            "AE" => Ok(EvidenceList),
+            "AM" => Ok(MusicList),
+            "RC" => Ok(AO2CharacterList),
+            "RD" => Ok(AO2Ready),
+            "CC" => Ok(SelectCharacter),
+            "MS" => Ok(ICMessage),
+            "CT" => Ok(OOCMessage),
+            "MC" => Ok(PlaySong),
+            "RT" => Ok(WTCEButtons),
+            "SETCASE" => Ok(SetCasePreferences),
+            "CASEA" => Ok(CaseAnnounce),
+            "HP" => Ok(Penalties),
+            "PE" => Ok(AddEvidence),
+            "DE" => Ok(DeleteEvidence),
+            "EE" => Ok(EditEvidence),
+            "ZZ" => Ok(CallModButton),
+            "opKICK" => Ok(KickWithGuard),
+            "opBAN" => Ok(BanWithGuard),
+            _ => anyhow::bail!("Invalid command!"),
+        }
+    }
+}
+
 enum DecodeState {
     Command,
     Arguments,
 }
 
 use serde::export::Formatter;
-use std::io::Cursor;
+use std::{
+    io::{BufRead, Cursor, Seek, SeekFrom},
+    str::FromStr,
+};
 use tokio::{
-    io::{AsyncBufReadExt, Error},
+    io::{AsyncBufReadExt, Error, ErrorKind},
     stream::StreamExt,
 };
 use tokio_util::codec::{Decoder, Encoder, FramedRead};
@@ -51,17 +90,6 @@ pub struct AOMessage {
     pub command: Command,
     pub args: Vec<String>,
 }
-
-#[derive(Debug)]
-pub struct AOMessageError;
-
-impl std::fmt::Display for AOMessageError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Ao message error!")
-    }
-}
-
-impl std::error::Error for AOMessageError {}
 
 pub struct AOMessageCodec {
     state: DecodeState,
@@ -75,29 +103,46 @@ impl AOMessageCodec {
 
 impl Decoder for AOMessageCodec {
     type Item = AOMessage;
-    type Error = AOMessageError;
+    type Error = anyhow::Error;
 
     fn decode(
         &mut self,
         mut src: &mut BytesMut,
     ) -> Result<Option<Self::Item>, Self::Error> {
-        match self.state {
-            DecodeState::Command => {
-                let mut cmd_buf = Vec::with_capacity(8);
-                let mut reader = Cursor::new(src);
-                let cmd = reader.read_until(b'#', &mut cmd_buf).await?;
-                assert!(cmd >= 2 && cmd <= 8);
-                log::debug!("Cmd buf: {:?}", &cmd_buf);
-                Ok(Some(AOMessage {
-                    command: Command::Handshake,
-                    args: vec![],
-                }))
-            }
-            DecodeState::Arguments => Ok(Some(AOMessage {
-                command: Command::Handshake,
-                args: vec![],
-            })),
+        let mut reader = Cursor::new(src);
+        let mut cmd_buf = Vec::with_capacity(8);
+        let cmd_len = BufRead::read_until(&mut reader, b'#', &mut cmd_buf)?;
+
+        if cmd_len == 0 {
+            log::debug!("Invalid protocol?!");
+            anyhow::bail!("Invalid protocol!")
         }
+
+        cmd_buf.truncate(cmd_len.saturating_sub(1));
+        let command: Command = unsafe {
+            // We are sure that the commands will *always* be valid utf8
+            String::from_utf8_unchecked(cmd_buf)
+        }
+        .parse()?;
+
+        reader.seek(SeekFrom::Start(cmd_len as u64))?;
+        let mut splitted = BufRead::split(reader, b'#')
+            .map(|l| String::from_utf8(l.unwrap()).unwrap());
+        let mut args: Vec<String> = splitted.collect();
+        let mut end_header_index = 0;
+
+        for (i, arg) in args.iter().enumerate() {
+            if arg.chars().nth(0).unwrap() == '%' {
+                end_header_index = i;
+                break;
+            } else {
+                continue;
+            }
+        }
+
+        args.remove(end_header_index);
+
+        Ok(Some(AOMessage { command, args: vec![] }))
     }
 }
 
@@ -161,8 +206,10 @@ impl AOServer {
                     }
                 }
 
-                let mut fr = FramedRead::new(&mut buf, AOMessageCodec::new());
-                fr.next()
+                let mut fr =
+                    FramedRead::new(buf.as_ref(), AOMessageCodec::new());
+                let message = fr.next().await;
+                log::debug!("Message: {:?}", message)
             });
         }
     }
