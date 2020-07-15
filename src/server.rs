@@ -75,21 +75,14 @@ pub struct AOMessage<'a> {
 
 pub struct AOMessageCodec<'a> {
     _phantom: PhantomData<&'a ()>,
-    state: DecodeState
 }
 
 impl<'a> AOMessageCodec<'a> {
     pub fn new() -> Self {
         Self {
             _phantom: PhantomData,
-            state: DecodeState::Command
         }
     }
-}
-
-pub enum DecodeState {
-    Command,
-    Args
 }
 
 impl<'a> Decoder for AOMessageCodec<'a> {
