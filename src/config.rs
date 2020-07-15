@@ -1,7 +1,4 @@
-use once_cell::sync::OnceCell;
 use serde::Deserialize;
-
-pub static CONFIG: OnceCell<Config> = OnceCell::new();
 
 #[derive(Deserialize)]
 pub struct Config {

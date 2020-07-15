@@ -1,4 +1,4 @@
-use crate::config::CONFIG;
+use crate::config::Config;
 use bytes::{BufMut, BytesMut};
 use std::{borrow::Cow, fmt::Debug, str};
 use tokio::{
@@ -84,6 +84,7 @@ use tokio::{
     stream::StreamExt,
 };
 use tokio_util::codec::{Decoder, Encoder, FramedRead};
+use std::path::PathBuf;
 
 #[derive(Debug)]
 pub struct AOMessage {
@@ -175,15 +176,26 @@ fn clean_utf8(mut bytes: &[u8]) -> String {
     }
 }
 
-pub struct AOServer;
+pub struct AOServer {
+    config: Config
+}
 
 impl AOServer {
-    pub async fn run() -> anyhow::Result<()> {
+    pub fn new() -> anyhow::Result<Self> {
+        let config_path = PathBuf::from("./config/config.toml");
+        log::debug!("Getting config from default path: {:?}", &config_path);
+        let config: Config = toml::from_str(&std::fs::read_to_string(&config_path)?)?;
+
+        Ok(Self {
+            config
+        })
+    }
+}
+
+impl AOServer {
+    pub async fn run(&self) -> anyhow::Result<()> {
         log::info!("Starting up the server...");
-        let mut addr = String::with_capacity(16);
-        let config = CONFIG.get().unwrap();
-        addr.push_str("127.0.0.1:");
-        addr.push_str(&config.general.port.to_string());
+        let addr = format!("127.0.0.1:{}", self.config.general.port);
         log::debug!("Binding to address: {}", &addr);
 
         let mut listener = TcpListener::bind(addr).await?;
