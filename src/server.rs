@@ -148,7 +148,7 @@ impl<'a> AOServer<'a> {
             log::debug!("got incoming connection from: {:?}", &c);
 
             tokio::spawn(async move {
-                let mut buf = [0; 64];
+                let mut buf = [0; 1024];
 
                 loop {
                     let n = socket
