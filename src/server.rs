@@ -5,6 +5,18 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream, ToSocketAddrs},
 };
+use std::fmt::Formatter;
+use std::{
+    io::{BufRead, Cursor, Seek, SeekFrom},
+    str::FromStr,
+};
+use tokio::{
+    io::{AsyncBufReadExt, Error, ErrorKind},
+    stream::StreamExt,
+};
+use tokio_util::codec::{Decoder, Encoder, FramedRead};
+use std::path::PathBuf;
+use crate::networking::Command;
 
 #[derive(Debug)]
 pub enum ClientCommand {
@@ -34,7 +46,7 @@ pub enum ClientCommand {
 }
 
 impl Command for ClientCommand {
-    fn from_protocol(name: String, mut args: Vec<String>) -> Self {
+    fn from_protocol(name: String, mut args: Vec<String>) -> Result<Self, anyhow::Error> {
         let args_len = args.len();
         match name.as_str() {
             "HI" => {
@@ -42,50 +54,33 @@ impl Command for ClientCommand {
                     anyhow::bail!("Amount of arguments for command HANDSHAKE does not match!")
                 }
 
-                Self::Handshake(args.remove(0))
+                Ok(Self::Handshake(args.remove(0)))
             },
-            _ => Self::ICMessage
+            _ => Ok(Self::ICMessage)
         }
     }
 }
 
-struct EvidenceArgs {
-    name: String,
-    description: String,
-    image: String,
+#[derive(Debug)]
+pub struct EvidenceArgs {
+    pub name: String,
+    pub description: String,
+    pub image: String,
 }
 
-struct CasePreferences {
-    cm: bool,
-    def: bool,
-    pro: bool,
-    judge: bool,
-    jury: bool,
-    steno: bool
+#[derive(Debug)]
+pub struct CasePreferences {
+    pub cm: bool,
+    pub def: bool,
+    pub pro: bool,
+    pub judge: bool,
+    pub jury: bool,
+    pub steno: bool
 }
-
-enum DecodeState {
-    Command,
-    Arguments,
-}
-
-use serde::export::Formatter;
-use std::{
-    io::{BufRead, Cursor, Seek, SeekFrom},
-    str::FromStr,
-};
-use tokio::{
-    io::{AsyncBufReadExt, Error, ErrorKind},
-    stream::StreamExt,
-};
-use tokio_util::codec::{Decoder, Encoder, FramedRead};
-use std::path::PathBuf;
-use crate::networking::Command;
 
 #[derive(Debug)]
 pub struct AOMessage {
     pub command: ClientCommand,
-    pub args: Vec<String>,
 }
 
 pub struct AOMessageCodec;
@@ -98,7 +93,10 @@ impl Decoder for AOMessageCodec {
         &mut self,
         mut src: &mut BytesMut,
     ) -> Result<Option<Self::Item>, Self::Error> {
-        let mut reader = Cursor::new(src);
+        if src.is_empty() {
+            return Ok(None);
+        }
+        let mut reader = Cursor::new(&src);
         let mut cmd_buf = Vec::with_capacity(8);
         let cmd_len = BufRead::read_until(&mut reader, b'#', &mut cmd_buf)?;
 
@@ -108,11 +106,11 @@ impl Decoder for AOMessageCodec {
         }
 
         cmd_buf.truncate(cmd_len.saturating_sub(1));
-        let command: ClientCommand = String::from_utf8_lossy(&cmd_buf).replace("�", "").parse()?;
+        let command_name = String::from_utf8_lossy(&cmd_buf).replace("�", "");
 
         reader.seek(SeekFrom::Start(cmd_len as u64))?;
         let mut splitted = BufRead::split(reader, b'#')
-            .map(|l| String::from_utf8(l.unwrap()).unwrap());
+            .map(|l| String::from_utf8_lossy(&l.unwrap()).replace("�", ""));
         let mut args: Vec<String> = splitted.collect();
         let mut end_header_index = 0;
 
@@ -127,7 +125,9 @@ impl Decoder for AOMessageCodec {
 
         args.remove(end_header_index);
 
-        Ok(Some(AOMessage { command, args }))
+        src.clear();
+
+        Ok(Some(AOMessage { command: Command::from_protocol(command_name, args)? }))
     }
 }
 
@@ -175,8 +175,9 @@ impl AOServer {
 
                 let mut fr =
                     FramedRead::new(buf.as_ref(), AOMessageCodec);
-                let message = fr.next().await;
-                log::debug!("Message: {:?}", message)
+                while let Some(Ok(message)) = fr.next().await {
+                    log::debug!("Got message: {:?}", message)
+                }
             });
         }
     }

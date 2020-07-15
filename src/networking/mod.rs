@@ -1,3 +1,3 @@
 pub trait Command {
-    fn from_protocol(name: String, args: Vec<String>) -> Result<Self, anyhow::Error>;
+    fn from_protocol(name: String, args: Vec<String>) -> Result<Self, anyhow::Error> where Self: Sized;
 }
