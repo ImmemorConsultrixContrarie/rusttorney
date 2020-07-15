@@ -115,15 +115,14 @@ impl<'a> Decoder for AOMessageCodec<'a> {
                 },
                 b @ Cow::Borrowed(_) => b
             };
-
             src.split_to(1);
+            
             let protocol_end = src.iter().rposition(|&b| b == b'%');
 
             if let Some(i) = protocol_end {
                 let args = src.split_to(i - 2);
 
-                // return Ok(Some(Command::from_protocol(&cmd_name, args.as_ref().split(|&b| b == b'#').map(|s| String::from_utf8_lossy(s).as_ref()))?));
-                return Ok(Some(ClientCommand::ICMessage))
+                return Ok(Some(Command::from_protocol(&cmd_name, args.as_ref().split(|&b| b == b'#').map(|s| String::from_utf8_lossy(s).as_ref()))?));
             }
         }
 
