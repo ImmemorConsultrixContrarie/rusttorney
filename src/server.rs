@@ -7,66 +7,61 @@ use tokio::{
 };
 
 #[derive(Debug)]
-pub enum Command {
-    Handshake,          // HI
-    ClientVersion,      // ID
+pub enum ClientCommand {
+    Handshake(String),          // HI#<hdid:String>#%
+    ClientVersion(u32, String, String),      // ID#<pv:u32>#<software:String>#<version:String>#%
     KeepAlive,          // CH
     AskListLengths,     // askchaa
     AskListCharacters,  // askchar
-    CharacterList,      // AN
-    EvidenceList,       // AE
-    MusicList,          // AM
-    AO2CharacterList,   // RC
-    AO2Ready,           // RD
-    SelectCharacter,    // CC
+    CharacterList(u32),      // AN#<page:u32>#%
+    EvidenceList(u32),       // AE#<page:u32>#%
+    MusicList(u32),          // AM#<page:u32>#%
+    AO2CharacterList,   // AC#%
+    AO2MusicList,       // AM#%
+    AO2Ready,           // RD#%
+    SelectCharacter(u32, u32, String),    // CC<client_id:u32>#<char_id:u32#<hdid:String>#%
     ICMessage,          // MS
-    OOCMessage,         // CT
-    PlaySong,           // MC
-    WTCEButtons,        // RT
-    SetCasePreferences, // SETCASE
-    CaseAnnounce,       // CASEA
-    Penalties,          // HP
-    AddEvidence,        // PE
-    DeleteEvidence,     // DE
-    EditEvidence,       // EE
-    CallModButton,      // ZZ
-    KickWithGuard,      // opKICK
-    BanWithGuard,       // opBAN
+    OOCMessage(String, String),         // CT#<name:String>#<message:String>#%
+    PlaySong(u32, u32),           // MC#<song_name:u32>#<???:u32>#%
+    WTCEButtons(String),        // RT#<type:String>#%
+    SetCasePreferences(String, CasePreferences), // SETCASE#<cases:String>#<will_cm:boolean>#<will_def:boolean>#<will_pro:boolean>#<will_judge:boolean>#<will_jury:boolean>#<will_steno:boolean>#%
+    CaseAnnounce(String, CasePreferences),       // CASEA
+    Penalties(u32, u32),          // HP#<type:u32>#<new_value:u32>#%
+    AddEvidence(EvidenceArgs),        // PE#<name:String>#<description:String>#<image:String>#%
+    DeleteEvidence(u32),     // DE#<id:u32>#%
+    EditEvidence(u32, EvidenceArgs),       // EE#<id:u32>#<name:String>#<description:String>#<image:String>#%
+    CallModButton(Option<String>),      // ZZ?#<reason:String>?#%
 }
 
-impl FromStr for Command {
-    type Err = anyhow::Error;
+impl Command for ClientCommand {
+    fn from_protocol(name: String, mut args: Vec<String>) -> Self {
+        let args_len = args.len();
+        match name.as_str() {
+            "HI" => {
+                if args_len != 1 {
+                    anyhow::bail!("Amount of arguments for command HANDSHAKE does not match!")
+                }
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use Command::*;
-        match s {
-            "HI" => Ok(Handshake),
-            "ID" => Ok(ClientVersion),
-            "CH" => Ok(KeepAlive),
-            "askchaa" => Ok(AskListLengths),
-            "askchar" => Ok(AskListCharacters),
-            "AN" => Ok(CharacterList),
-            "AE" => Ok(EvidenceList),
-            "AM" => Ok(MusicList),
-            "RC" => Ok(AO2CharacterList),
-            "RD" => Ok(AO2Ready),
-            "CC" => Ok(SelectCharacter),
-            "MS" => Ok(ICMessage),
-            "CT" => Ok(OOCMessage),
-            "MC" => Ok(PlaySong),
-            "RT" => Ok(WTCEButtons),
-            "SETCASE" => Ok(SetCasePreferences),
-            "CASEA" => Ok(CaseAnnounce),
-            "HP" => Ok(Penalties),
-            "PE" => Ok(AddEvidence),
-            "DE" => Ok(DeleteEvidence),
-            "EE" => Ok(EditEvidence),
-            "ZZ" => Ok(CallModButton),
-            "opKICK" => Ok(KickWithGuard),
-            "opBAN" => Ok(BanWithGuard),
-            _ => anyhow::bail!("Invalid command!"),
+                Self::Handshake(args.remove(0))
+            },
+            _ => Self::ICMessage
         }
     }
+}
+
+struct EvidenceArgs {
+    name: String,
+    description: String,
+    image: String,
+}
+
+struct CasePreferences {
+    cm: bool,
+    def: bool,
+    pro: bool,
+    judge: bool,
+    jury: bool,
+    steno: bool
 }
 
 enum DecodeState {
@@ -85,22 +80,15 @@ use tokio::{
 };
 use tokio_util::codec::{Decoder, Encoder, FramedRead};
 use std::path::PathBuf;
+use crate::networking::Command;
 
 #[derive(Debug)]
 pub struct AOMessage {
-    pub command: Command,
+    pub command: ClientCommand,
     pub args: Vec<String>,
 }
 
-pub struct AOMessageCodec {
-    state: DecodeState,
-}
-
-impl AOMessageCodec {
-    pub fn new() -> Self {
-        Self { state: DecodeState::Command }
-    }
-}
+pub struct AOMessageCodec;
 
 impl Decoder for AOMessageCodec {
     type Item = AOMessage;
@@ -120,7 +108,7 @@ impl Decoder for AOMessageCodec {
         }
 
         cmd_buf.truncate(cmd_len.saturating_sub(1));
-        let command: Command = String::from_utf8_lossy(&cmd_buf).replace("�", "").parse()?;
+        let command: ClientCommand = String::from_utf8_lossy(&cmd_buf).replace("�", "").parse()?;
 
         reader.seek(SeekFrom::Start(cmd_len as u64))?;
         let mut splitted = BufRead::split(reader, b'#')
@@ -186,7 +174,7 @@ impl AOServer {
                 }
 
                 let mut fr =
-                    FramedRead::new(buf.as_ref(), AOMessageCodec::new());
+                    FramedRead::new(buf.as_ref(), AOMessageCodec);
                 let message = fr.next().await;
                 log::debug!("Message: {:?}", message)
             });
