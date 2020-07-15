@@ -115,16 +115,12 @@ impl Decoder for AOMessageCodec {
         let cmd_len = BufRead::read_until(&mut reader, b'#', &mut cmd_buf)?;
 
         if cmd_len == 0 {
-            log::debug!("Invalid protocol?!");
+            log::error!("Invalid protocol?!");
             anyhow::bail!("Invalid protocol!")
         }
 
         cmd_buf.truncate(cmd_len.saturating_sub(1));
-        let command: Command = unsafe {
-            // We are sure that the commands will *always* be valid utf8
-            String::from_utf8_unchecked(cmd_buf)
-        }
-        .parse()?;
+        let command: Command = String::from_utf8_lossy(&cmd_buf).replace("�", "").parse()?;
 
         reader.seek(SeekFrom::Start(cmd_len as u64))?;
         let mut splitted = BufRead::split(reader, b'#')
@@ -133,7 +129,7 @@ impl Decoder for AOMessageCodec {
         let mut end_header_index = 0;
 
         for (i, arg) in args.iter().enumerate() {
-            if arg.chars().nth(0).unwrap() == '%' {
+            if arg.chars().next().unwrap() == '%' {
                 end_header_index = i;
                 break;
             } else {
@@ -144,35 +140,6 @@ impl Decoder for AOMessageCodec {
         args.remove(end_header_index);
 
         Ok(Some(AOMessage { command, args }))
-    }
-}
-
-fn clean_utf8(mut bytes: &[u8]) -> String {
-    let mut output = String::new();
-
-    loop {
-        match str::from_utf8(bytes) {
-            Ok(s) => {
-                output.push_str(s);
-                return output;
-            }
-            Err(e) => {
-                let (good, bad) = bytes.split_at(e.valid_up_to());
-
-                if !good.is_empty() {
-                    let s = unsafe { str::from_utf8_unchecked(good) };
-                    output.push_str(s);
-                }
-
-                if bad.is_empty() {
-                    return output;
-                }
-
-                output.push_str("");
-
-                bytes = &bad[1..];
-            }
-        }
     }
 }
 
