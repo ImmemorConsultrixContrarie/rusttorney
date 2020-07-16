@@ -57,15 +57,16 @@ impl Command for ClientCommand {
         name: String,
         mut args: impl Iterator<Item = String>,
     ) -> Result<Self, anyhow::Error> {
-        let args = &mut args;
+        // let args = &mut args;
         let on_err = || {
             anyhow::anyhow!(
                 "Amount of arguments for command {} does not match!",
                 &name
             )
         };
+
         fn next<'a, E, T, F>(
-            args: &mut impl Iterator<Item = String>,
+            mut args: impl Iterator<Item = String>,
             on_err: F,
         ) -> Result<T, anyhow::Error>
         where
@@ -73,15 +74,19 @@ impl Command for ClientCommand {
             T: FromStr<Err = E>,
             F: Fn() -> anyhow::Error,
         {
-            args.next().ok_or_else(on_err).map(|s| s.parse::<T>()).and_then(
-                |r| match r {
-                    Ok(t) => Ok(t),
-                    Err(e) => Err(anyhow::anyhow!("{}", e)),
-                },
-            )
+            args.next()
+                .ok_or_else(on_err)
+                .map(|s| s.parse::<T>().map_err(|e| anyhow::anyhow!("{}", e))).flatten()
         }
+
         match name.as_str() {
-            "HI" => Ok(Self::Handshake(next(args, on_err)?)),
+            "HI" => {
+                let res = Ok(Self::Handshake(next(&mut args, on_err)?));
+                if args.next().is_some() {
+                    return Err(on_err());
+                }
+                res
+            },
             _ => Err(on_err()),
         }
     }
@@ -175,6 +180,8 @@ impl<'a> AOServer<'a> {
     }
 
     pub async fn run(&self) -> anyhow::Result<()> {
+        use futures::StreamExt;
+
         log::info!("Starting up the server...");
         let addr = format!("127.0.0.1:{}", self.config.general.port);
         log::debug!("Binding to address: {}", &addr);
@@ -185,25 +192,18 @@ impl<'a> AOServer<'a> {
             let (mut socket, c) = listener.accept().await?;
             log::debug!("got incoming connection from: {:?}", &c);
 
-            tokio::spawn(async move {
-                let mut buf = [0; 1024];
+            let msg_stream = AOMessageCodec.framed(socket);
 
-                loop {
-                    let n = socket
-                        .read(&mut buf)
-                        .await
-                        .expect("Failed to read data!");
-
-                    if n == 0 {
-                        break;
+            tokio::spawn(msg_stream.for_each(|msg| async {
+                match msg {
+                    Ok(msg) => {
+                        log::debug!("Got message: {:?}", msg)
+                    },
+                    Err(err) => {
+                        log::error!("Got error: {:?}", err)
                     }
                 }
-
-                let mut fr = FramedRead::new(buf.as_ref(), AOMessageCodec);
-                while let Some(cmd) = fr.next().await {
-                    log::debug!("Got message: {:?}", cmd)
-                }
-            });
+            }));
         }
     }
 }
