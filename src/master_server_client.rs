@@ -106,11 +106,11 @@ impl<'a, R: CommandReader + Unpin, W: AsyncWrite + Unpin> MasterServerClient<'a,
     }
 }
 
-impl MasterServerClient<'static, TcpCommandReader, WriteHalf<TcpStream>> {
+impl<'a> MasterServerClient<'a, TcpCommandReader, WriteHalf<TcpStream>> {
     pub async fn from_config_with_connect(
-        config: &'static Config<'static>,
-        software: &'static str,
-    ) -> Result<Self, std::io::Error> {
+        config: &'a Config<'a>,
+        software: &'a str,
+    ) -> Result<MasterServerClient<'a, TcpCommandReader, WriteHalf<TcpStream>>, std::io::Error> {
         let stream = TcpStream::connect(SocketAddr::V4(SocketAddrV4::new(
             Ipv4Addr::from(config.masterserver.ip.parse::<u32>().unwrap()),
             config.masterserver.port,
