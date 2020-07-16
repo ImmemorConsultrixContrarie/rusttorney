@@ -1,7 +1,7 @@
 #![allow(unused)]
-use log::LevelFilter;
-use rusttorney::{server::AOServer, config::Config};
 use env_logger::Env;
+use log::LevelFilter;
+use rusttorney::{config::Config, server::AOServer};
 use std::path::PathBuf;
 
 #[tokio::main]
@@ -17,7 +17,6 @@ async fn main() -> anyhow::Result<()> {
     } else {
         filter = "info"
     }
-
 
     env_logger::from_env(Env::default().default_filter_or(filter)).init();
 

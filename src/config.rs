@@ -12,7 +12,7 @@ pub struct Config<'a> {
     #[serde(borrow)]
     pub masterserver: MasterServerConfig<'a>,
     pub wtce_floodguard: FloodGuardConfig,
-    pub music_change_floodguard: FloodGuardConfig
+    pub music_change_floodguard: FloodGuardConfig,
 }
 
 #[derive(Deserialize)]
@@ -41,7 +41,7 @@ pub struct MasterServerConfig<'a> {
 pub struct FloodGuardConfig {
     pub times_per_interval: u8,
     pub interval_length: u8,
-    pub mute_length: u32
+    pub mute_length: u32,
 }
 
 #[cfg(test)]
