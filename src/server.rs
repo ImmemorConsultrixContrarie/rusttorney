@@ -1,50 +1,63 @@
-use crate::config::Config;
-use bytes::{BytesMut, Bytes};
-use std::{fmt::Debug, str};
-use tokio::{
-    io::{AsyncReadExt},
-    net::{TcpListener},
-};
+use crate::{config::Config, networking::Command};
+use bytes::{Buf, Bytes, BytesMut};
 use std::{
+    borrow::{BorrowMut, Cow},
+    char::REPLACEMENT_CHARACTER,
+    fmt::Debug,
     io::{BufRead, Cursor, Seek, SeekFrom},
+    marker::PhantomData,
+    str,
 };
-use tokio::{
-    stream::StreamExt,
-};
+use tokio::{io::AsyncReadExt, net::TcpListener, stream::StreamExt};
 use tokio_util::codec::{Decoder, FramedRead};
-use std::{marker::PhantomData, borrow::{BorrowMut, Cow}};
-use crate::networking::Command;
+
+const MAGIC_SEPARATOR: u8 = b'#';
+const MAGIC_END: u8 = b'%';
 
 #[derive(Debug)]
-pub enum ClientCommand<'a> {
-    Handshake(&'a str),                             // HI#<hdid:String>#%
-    ClientVersion(u32, &'a str, &'a str),           // ID#<pv:u32>#<software:String>#<version:String>#%
-    KeepAlive,                                      // CH
-    AskListLengths,                                 // askchaa
-    AskListCharacters,                              // askchar
-    CharacterList(u32),                             // AN#<page:u32>#%
-    EvidenceList(u32),                              // AE#<page:u32>#%
-    MusicList(u32),                                 // AM#<page:u32>#%
-    AO2CharacterList,                               // AC#%
-    AO2MusicList,                                   // AM#%
-    AO2Ready,                                       // RD#%
-    SelectCharacter(u32, u32, &'a str),             // CC<client_id:u32>#<char_id:u32#<hdid:String>#%
-    ICMessage,                                      // MS
-    OOCMessage(&'a str, &'a str),                   // CT#<name:String>#<message:String>#%
-    PlaySong(u32, u32),                             // MC#<song_name:u32>#<???:u32>#%
-    WTCEButtons(&'a str),                           // RT#<type:String>#%
-    SetCasePreferences(&'a str, CasePreferences),   // SETCASE#<cases:String>#<will_cm:boolean>#<will_def:boolean>#<will_pro:boolean>#<will_judge:boolean>#<will_jury:boolean>#<will_steno:boolean>#%
-    CaseAnnounce(&'a str, CasePreferences),         // CASEA
-    Penalties(u32, u32),                            // HP#<type:u32>#<new_value:u32>#%
-    AddEvidence(EvidenceArgs<'a>),                  // PE#<name:String>#<description:String>#<image:String>#%
-    DeleteEvidence(u32),                            // DE#<id:u32>#%
-    EditEvidence(u32, EvidenceArgs<'a>),            // EE#<id:u32>#<name:String>#<description:String>#<image:String>#%
-    CallModButton(Option<&'a str>),                 // ZZ?#<reason:String>?#%
+pub enum ClientCommand {
+    Handshake(String),                  // HI#<hdid:String>#%
+    ClientVersion(u32, String, String), /* ID#<pv:u32>#<software:String>#
+                                         * <version:String>#% */
+    KeepAlive,                                   // CH
+    AskListLengths,                              // askchaa
+    AskListCharacters,                           // askchar
+    CharacterList(u32),                          // AN#<page:u32>#%
+    EvidenceList(u32),                           // AE#<page:u32>#%
+    MusicList(u32),                              // AM#<page:u32>#%
+    AO2CharacterList,                            // AC#%
+    AO2MusicList,                                // AM#%
+    AO2Ready,                                    // RD#%
+    SelectCharacter(u32, u32, String),           /* CC<client_id:u32>#
+                                                  * <char_id:u32#<hdid:
+                                                  * String>#% */
+    ICMessage,                                   // MS
+    OOCMessage(String, String),                  /* CT#<name:String>#
+                                                  * <message:String>#% */
+    PlaySong(u32, u32),  // MC#<song_name:u32>#<???:u32>#%
+    WTCEButtons(String), // RT#<type:String>#%
+    SetCasePreferences(String, CasePreferences), /* SETCASE#<cases:String>#<will_cm:boolean>#<will_def:boolean>#<will_pro:boolean>#<will_judge:boolean>#<will_jury:boolean>#<will_steno:boolean>#% */
+    CaseAnnounce(String, CasePreferences),       // CASEA
+    Penalties(u32, u32),                         /* HP#<type:u32>#
+                                                  * <new_value:u32>#% */
+    AddEvidence(EvidenceArgs), /* PE#<name:String>#<description:String>#
+                                * <image:String>#% */
+    DeleteEvidence(u32),             // DE#<id:u32>#%
+    EditEvidence(u32, EvidenceArgs), /* EE#<id:u32>#<name:String>#
+                                      * <description:String>#<image:
+                                      * String>#% */
+    CallModButton(Option<String>), // ZZ?#<reason:String>?#%
 }
 
-impl<'a> Command<'a> for ClientCommand<'a> {
-    fn from_protocol(name: &'a str, args: impl Iterator<Item = &'a str>) -> Result<Self, anyhow::Error> {
-        Ok(Self::ICMessage)
+impl Command for ClientCommand {
+    fn from_protocol(
+        name: String,
+        args: impl Iterator<Item = String>,
+    ) -> Result<Self, anyhow::Error> {
+        match (name.as_ref(), args.collect::<Vec<String>>().as_mut_slice()) {
+            ("HI", [arg]) => Ok(Self::Handshake(std::mem::take(arg))),
+            (cmd, _) => anyhow::bail!("Amount of arguments for command {} does not match!", cmd),
+        }
     }
     fn handle(&self) -> futures::future::BoxFuture<'static, ()> {
         todo!()
@@ -52,10 +65,10 @@ impl<'a> Command<'a> for ClientCommand<'a> {
 }
 
 #[derive(Debug)]
-pub struct EvidenceArgs<'a> {
-    pub name: &'a str,
-    pub description: &'a str,
-    pub image: &'a str,
+pub struct EvidenceArgs {
+    pub name: String,
+    pub description: String,
+    pub image: String,
 }
 
 #[derive(Debug)]
@@ -65,28 +78,18 @@ pub struct CasePreferences {
     pub pro: bool,
     pub judge: bool,
     pub jury: bool,
-    pub steno: bool
+    pub steno: bool,
 }
 
 #[derive(Debug)]
-pub struct AOMessage<'a> {
-    pub command: ClientCommand<'a>,
+pub struct AOMessage {
+    pub command: ClientCommand,
 }
 
-pub struct AOMessageCodec<'a> {
-    _phantom: PhantomData<&'a ()>,
-}
+pub struct AOMessageCodec;
 
-impl<'a> AOMessageCodec<'a> {
-    pub fn new() -> Self {
-        Self {
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<'a> Decoder for AOMessageCodec<'a> {
-    type Item = ClientCommand<'a>;
+impl Decoder for AOMessageCodec {
+    type Item = ClientCommand;
     type Error = anyhow::Error;
 
     fn decode(
@@ -97,43 +100,52 @@ impl<'a> Decoder for AOMessageCodec<'a> {
             return Ok(None);
         }
 
-        let magic_b = src.iter().position(|&byte| byte == b'#');
+        let magic_b = src.iter().position(|&byte| byte == MAGIC_SEPARATOR);
         if let Some(i) = magic_b {
             let cmd = src.split_to(i);
 
-            let cmd_name = match String::from_utf8_lossy(&cmd) {
-                Cow::Owned(mut own) => {
-                    own.retain(|c| c == '�');
-                    Cow::Owned(own)
-                },
-                b @ Cow::Borrowed(_) => b
-            };
-            src.split_to(1);
-            
-            let protocol_end = src.iter().rposition(|&b| b == b'%');
+            let cmd_name = ignore_ill_utf8(&cmd);
+            src.advance(1);
+
+            let protocol_end = src.iter().rposition(|&b| b == MAGIC_END);
 
             if let Some(i) = protocol_end {
                 let args = src.split_to(i - 2);
 
-                return Ok(Some(Command::from_protocol(&cmd_name, args.as_ref().split(|&b| b == b'#').map(|s| String::from_utf8_lossy(s).as_ref()))?));
+                src.clear();
+
+                return Ok(Some(Command::from_protocol(
+                    cmd_name,
+                    args.as_ref()
+                        .split(|&b| b == MAGIC_SEPARATOR)
+                        .map(|s| ignore_ill_utf8(s)),
+                )?));
             }
         }
-
-        src.clear();
 
         Ok(None)
     }
 }
 
+fn ignore_ill_utf8(v: &[u8]) -> String {
+    let str = String::from_utf8_lossy(&v);
+
+    match str {
+        Cow::Owned(mut own) => {
+            own.retain(|c| c != REPLACEMENT_CHARACTER);
+            own
+        }
+        Cow::Borrowed(brw) => brw.to_owned(),
+    }
+}
+
 pub struct AOServer<'a> {
-    config: Config<'a>
+    config: Config<'a>,
 }
 
 impl<'a> AOServer<'a> {
     pub fn new(config: Config<'a>) -> anyhow::Result<Self> {
-        Ok(Self {
-            config
-        })
+        Ok(Self { config })
     }
 
     pub async fn run(&self) -> anyhow::Result<()> {
@@ -161,10 +173,9 @@ impl<'a> AOServer<'a> {
                     }
                 }
 
-                let mut fr =
-                    FramedRead::new(buf.as_ref(), AOMessageCodec::new());
-                while let Some(Ok(message)) = fr.next().await {
-                    log::debug!("Got message: {:?}", message)
+                let mut fr = FramedRead::new(buf.as_ref(), AOMessageCodec);
+                while let Some(cmd) = fr.next().await {
+                    log::debug!("Got message: {:?}", cmd)
                 }
             });
         }
