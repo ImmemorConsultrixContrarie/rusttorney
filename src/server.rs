@@ -1,12 +1,14 @@
 use crate::{config::Config, networking::Command};
 use bytes::{Buf, Bytes, BytesMut};
+use futures::FutureExt;
 use std::{
     borrow::{BorrowMut, Cow},
     char::REPLACEMENT_CHARACTER,
-    fmt::Debug,
+    fmt::{Debug, Display},
     io::{BufRead, Cursor, Seek, SeekFrom},
     marker::PhantomData,
     str,
+    str::FromStr,
 };
 use tokio::{io::AsyncReadExt, net::TcpListener, stream::StreamExt};
 use tokio_util::codec::{Decoder, FramedRead};
@@ -14,6 +16,7 @@ use tokio_util::codec::{Decoder, FramedRead};
 const MAGIC_SEPARATOR: u8 = b'#';
 const MAGIC_END: u8 = b'%';
 
+#[rustfmt::skip]
 #[derive(Debug)]
 pub enum ClientCommand {
     Handshake(String),                  // HI#<hdid:String>#%
@@ -50,13 +53,36 @@ pub enum ClientCommand {
 }
 
 impl Command for ClientCommand {
-    fn from_protocol(
+    fn from_protocol<'a>(
         name: String,
-        args: impl Iterator<Item = String>,
+        mut args: impl Iterator<Item = String>,
     ) -> Result<Self, anyhow::Error> {
-        match (name.as_ref(), args.collect::<Vec<String>>().as_mut_slice()) {
-            ("HI", [arg]) => Ok(Self::Handshake(std::mem::take(arg))),
-            (cmd, _) => anyhow::bail!("Amount of arguments for command {} does not match!", cmd),
+        let args = &mut args;
+        let on_err = || {
+            anyhow::anyhow!(
+                "Amount of arguments for command {} does not match!",
+                &name
+            )
+        };
+        fn next<'a, E, T, F>(
+            args: &mut impl Iterator<Item = String>,
+            on_err: F,
+        ) -> Result<T, anyhow::Error>
+        where
+            E: Display,
+            T: FromStr<Err = E>,
+            F: Fn() -> anyhow::Error,
+        {
+            args.next().ok_or_else(on_err).map(|s| s.parse::<T>()).and_then(
+                |r| match r {
+                    Ok(t) => Ok(t),
+                    Err(e) => Err(anyhow::anyhow!("{}", e)),
+                },
+            )
+        }
+        match name.as_str() {
+            "HI" => Ok(Self::Handshake(next(args, on_err)?)),
+            _ => Err(on_err()),
         }
     }
     fn handle(&self) -> futures::future::BoxFuture<'static, ()> {
