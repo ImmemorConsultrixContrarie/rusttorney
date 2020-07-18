@@ -289,19 +289,21 @@ impl<'a> AOServer<'a> {
             let (socket, c) = listener.accept().await?;
             log::debug!("got incoming connection from: {:?}", &c);
 
-            let (msg_sink, mut msg_stream) =
-                AOMessageCodec.framed(socket).split();
-            let mut handler = AO2MessageHandler::new(msg_sink);
+            tokio::spawn(async move {
+                let (msg_sink, mut msg_stream) =
+                    AOMessageCodec.framed(socket).split();
+                let mut handler = AO2MessageHandler::new(msg_sink);
 
-            while let Some(msg_res) = msg_stream.next().await {
-                match msg_res {
-                    Ok(msg) => {
-                        log::debug!("Got command! {:?}", &msg);
-                        handler.handle(msg).await.unwrap();
+                while let Some(msg_res) = msg_stream.next().await {
+                    match msg_res {
+                        Ok(msg) => {
+                            log::debug!("Got command! {:?}", &msg);
+                            handler.handle(msg).await.unwrap();
+                        }
+                        Err(err) => log::error!("Got error! {:?}", err),
                     }
-                    Err(err) => log::error!("Got error! {:?}", err),
                 }
-            }
+            });
         }
     }
 }
