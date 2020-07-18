@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct Config<'a> {
     pub debug: bool,
     pub timeout: u32,
@@ -15,7 +15,7 @@ pub struct Config<'a> {
     pub music_change_floodguard: FloodGuardConfig,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct GeneralConfig<'a> {
     pub hostname: &'a str,
     pub playerlimit: u8,
@@ -23,21 +23,20 @@ pub struct GeneralConfig<'a> {
     pub local: bool,
     pub modpass: &'a str,
     pub motd: &'a str,
-    pub use_websockets: bool,
-    pub websocket_port: u32,
+    pub websocket_port: Option<u32>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct MasterServerConfig<'a> {
     #[serde(rename = "use")]
     pub use_masterserver: bool,
     pub ip: &'a str,
-    pub port: u32,
+    pub port: u16,
     pub name: &'a str,
     pub description: &'a str,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct FloodGuardConfig {
     pub times_per_interval: u8,
     pub interval_length: u8,
@@ -56,8 +55,8 @@ mod tests {
         multiclient_limit = 16
         max_chars = 256
         zalgo_tolerance = 3
-        
-        
+
+
         [general]
         hostname = "<dollar>H"
         playerlimit = 100
@@ -67,19 +66,19 @@ mod tests {
         motd = "Welcome to my server!"
         use_websockets = true
         websocket_port = 50001
-        
+
         [masterserver]
         use = true
         ip = "master.aceattorneyonline.com"
         port = 27016
         name = "My server"
         description = "My server description!"
-        
+
         [music_change_floodguard]
         times_per_interval = 3
         interval_length = 20
         mute_length = 180
-        
+
         [wtce_floodguard]
         times_per_interval = 5
         interval_length = 10
