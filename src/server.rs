@@ -1,6 +1,10 @@
 use crate::{config::Config, networking::Command};
 use bytes::{Buf, Bytes, BytesMut};
+use futures::io::Error;
+use futures::lock::Mutex;
 use futures::{FutureExt, SinkExt};
+use std::fmt::Write;
+use std::sync::Arc;
 use std::{
     borrow::{BorrowMut, Cow},
     char::REPLACEMENT_CHARACTER,
@@ -11,11 +15,7 @@ use std::{
     str::FromStr,
 };
 use tokio::{io::AsyncReadExt, net::TcpListener, stream::StreamExt};
-use tokio_util::codec::{Decoder, FramedRead, Encoder};
-use futures::io::Error;
-use std::fmt::Write;
-use std::sync::Arc;
-use futures::lock::Mutex;
+use tokio_util::codec::{Decoder, Encoder, FramedRead};
 
 const MAGIC_SEPARATOR: u8 = b'#';
 const MAGIC_END: u8 = b'%';
@@ -80,7 +80,8 @@ impl Command for ClientCommand {
         {
             args.next()
                 .ok_or_else(on_err)
-                .map(|s| s.parse::<T>().map_err(|e| anyhow::anyhow!("{}", e))).and_then(std::convert::identity)
+                .map(|s| s.parse::<T>().map_err(|e| anyhow::anyhow!("{}", e)))
+                .and_then(std::convert::identity)
         }
 
         match name.as_str() {
@@ -90,7 +91,7 @@ impl Command for ClientCommand {
                     return Err(on_err());
                 }
                 res
-            },
+            }
             _ => Err(on_err()),
         }
     }
@@ -198,16 +199,12 @@ impl<'a> AOServer<'a> {
 
             let msg_stream = AOMessageCodec.framed(socket);
 
-            tokio::spawn(msg_stream.for_each(move |msg| {
-                async move {
-                    match msg {
-                        Ok(msg) => {
-                            log::debug!("Got message: {:?}", msg);
-                        },
-                        Err(err) => {
-                            log::error!("Got error: {:?}", err)
-                        }
+            tokio::spawn(msg_stream.for_each(move |msg| async move {
+                match msg {
+                    Ok(msg) => {
+                        log::debug!("Got message: {:?}", msg);
                     }
+                    Err(err) => log::error!("Got error: {:?}", err),
                 }
             }));
         }
