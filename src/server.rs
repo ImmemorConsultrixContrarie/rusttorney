@@ -1,21 +1,13 @@
 use crate::{config::Config, networking::Command};
-use bytes::{Buf, Bytes, BytesMut};
-use futures::io::Error;
-use futures::lock::Mutex;
-use futures::{FutureExt, SinkExt};
-use std::fmt::Write;
-use std::sync::Arc;
+use bytes::{Buf, BytesMut};
 use std::{
-    borrow::{BorrowMut, Cow},
+    borrow::Cow,
     char::REPLACEMENT_CHARACTER,
     fmt::{Debug, Display},
-    io::{BufRead, Cursor, Seek, SeekFrom},
-    marker::PhantomData,
-    str,
     str::FromStr,
 };
-use tokio::{io::AsyncReadExt, net::TcpListener, stream::StreamExt};
-use tokio_util::codec::{Decoder, Encoder, FramedRead};
+use tokio::net::TcpListener;
+use tokio_util::codec::Decoder;
 
 const MAGIC_SEPARATOR: u8 = b'#';
 const MAGIC_END: u8 = b'%';
@@ -69,7 +61,7 @@ impl Command for ClientCommand {
             )
         };
 
-        fn next<'a, E, T, F>(
+        fn next<E, T, F>(
             mut args: impl Iterator<Item = String>,
             on_err: F,
         ) -> Result<T, anyhow::Error>
@@ -130,7 +122,7 @@ impl Decoder for AOMessageCodec {
 
     fn decode(
         &mut self,
-        mut src: &mut BytesMut,
+        src: &mut BytesMut,
     ) -> Result<Option<Self::Item>, Self::Error> {
         if src.is_empty() {
             return Ok(None);
@@ -194,7 +186,7 @@ impl<'a> AOServer<'a> {
         let mut listener = TcpListener::bind(addr).await?;
 
         loop {
-            let (mut socket, c) = listener.accept().await?;
+            let (socket, c) = listener.accept().await?;
             log::debug!("got incoming connection from: {:?}", &c);
 
             let msg_stream = AOMessageCodec.framed(socket);

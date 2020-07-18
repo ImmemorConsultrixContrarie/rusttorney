@@ -1,5 +1,4 @@
 use futures::future::BoxFuture;
-use std::borrow::Cow;
 
 pub trait Command {
     fn from_protocol(
