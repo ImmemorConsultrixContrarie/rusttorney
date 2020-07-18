@@ -1,13 +1,15 @@
 use crate::{config::Config, networking::Command};
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
+use futures::stream::SplitSink;
+use futures::SinkExt;
 use std::{
     borrow::Cow,
     char::REPLACEMENT_CHARACTER,
     fmt::{Debug, Display},
     str::FromStr,
 };
-use tokio::net::TcpListener;
-use tokio_util::codec::Decoder;
+use tokio::net::{TcpListener, TcpStream};
+use tokio_util::codec::{Decoder, Encoder, Framed};
 
 const MAGIC_SEPARATOR: u8 = b'#';
 const MAGIC_END: u8 = b'%';
@@ -46,6 +48,31 @@ pub enum ClientCommand {
                                       * <description:String>#<image:
                                       * String>#% */
     CallModButton(Option<String>), // ZZ?#<reason:String>?#%
+}
+
+#[rustfmt::skip]
+#[derive(Debug)]
+pub enum ServerCommand {
+    Handshake(String)
+}
+
+impl ServerCommand {
+    pub fn extract_args(&self) -> Option<Vec<&str>> {
+        use ServerCommand::*;
+
+        match self {
+            Handshake(str) => Some(vec![str]),
+            // _ => None,
+        }
+    }
+
+    pub fn ident(&self) -> &str {
+        use ServerCommand::*;
+
+        match self {
+            Handshake(_) => "HI",
+        }
+    }
 }
 
 impl Command for ClientCommand {
@@ -171,6 +198,79 @@ pub struct AOServer<'a> {
     config: Config<'a>,
 }
 
+pub struct AO2MessageHandler {
+    socket: SplitSink<Framed<TcpStream, AOMessageCodec>, ServerCommand>,
+}
+
+impl AO2MessageHandler {
+    pub fn new(
+        socket: SplitSink<Framed<TcpStream, AOMessageCodec>, ServerCommand>,
+    ) -> Self {
+        Self { socket }
+    }
+
+    pub async fn handle(
+        &mut self,
+        command: ClientCommand,
+    ) -> Result<(), anyhow::Error> {
+        match command {
+            ClientCommand::Handshake(hdid) => {
+                log::debug!("Handshake from HDID: {}", hdid);
+                self.handle_handshake(hdid).await
+            }
+            _ => Ok(()),
+        }
+    }
+
+    pub async fn handle_handshake(
+        &mut self,
+        _hdid: String,
+    ) -> Result<(), anyhow::Error> {
+        self.socket.send(ServerCommand::Handshake(1111.to_string())).await?;
+
+        Ok(())
+    }
+}
+
+impl Encoder<ServerCommand> for AOMessageCodec {
+    type Error = anyhow::Error;
+
+    fn encode(
+        &mut self,
+        item: ServerCommand,
+        dst: &mut BytesMut,
+    ) -> Result<(), Self::Error> {
+        let args_len = match item.extract_args() {
+            Some(args) => args.iter().fold(0, |i, s| i + s.len() + 1),
+            None => 0,
+        };
+        let ident = item.ident();
+        #[rustfmt::skip]
+        let reserve_len =
+            // 2 - 8
+            ident.len() +
+            // #
+            1 +
+            // args_len is every arg + #
+            args_len +
+            // %
+            1;
+        dst.reserve(reserve_len);
+        dst.put(ident.as_bytes());
+        dst.put_u8(b'#');
+
+        if let Some(args) = item.extract_args() {
+            for arg in args {
+                dst.put(arg.as_bytes());
+                dst.put_u8(b'#');
+            }
+        }
+
+        dst.put_u8(b'%');
+        Ok(())
+    }
+}
+
 impl<'a> AOServer<'a> {
     pub fn new(config: Config<'a>) -> anyhow::Result<Self> {
         Ok(Self { config })
@@ -189,16 +289,19 @@ impl<'a> AOServer<'a> {
             let (socket, c) = listener.accept().await?;
             log::debug!("got incoming connection from: {:?}", &c);
 
-            let msg_stream = AOMessageCodec.framed(socket);
+            let (msg_sink, mut msg_stream) =
+                AOMessageCodec.framed(socket).split();
+            let mut handler = AO2MessageHandler::new(msg_sink);
 
-            tokio::spawn(msg_stream.for_each(move |msg| async move {
-                match msg {
+            while let Some(msg_res) = msg_stream.next().await {
+                match msg_res {
                     Ok(msg) => {
-                        log::debug!("Got message: {:?}", msg);
+                        log::debug!("Got command! {:?}", &msg);
+                        handler.handle(msg).await.unwrap();
                     }
-                    Err(err) => log::error!("Got error: {:?}", err),
+                    Err(err) => log::error!("Got error! {:?}", err),
                 }
-            }));
+            }
         }
     }
 }
