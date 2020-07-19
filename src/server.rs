@@ -9,7 +9,9 @@ use std::{
     marker::PhantomData,
     str,
     str::FromStr,
+    sync::Mutex
 };
+use sqlx::sqlite::SqlitePool;
 use tokio::{io::AsyncReadExt, net::TcpListener, stream::StreamExt};
 use tokio_util::codec::{Decoder, FramedRead};
 
@@ -170,16 +172,18 @@ fn ignore_ill_utf8(v: &[u8]) -> String {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct AOServer<'a> {
-    config: Config<'a>,
+    config: &'a Config<'a>,
+    db_pool: &'a Mutex<SqlitePool>
 }
 
 impl<'a> AOServer<'a> {
-    pub fn new(config: Config<'a>) -> anyhow::Result<Self> {
-        Ok(Self { config })
+    pub fn new(config: &'a Config<'a>, db_pool: &'a Mutex<SqlitePool>) -> anyhow::Result<Self> {
+        Ok(Self { config, db_pool })
     }
 
-    pub async fn run(&self) -> anyhow::Result<()> {
+    pub async fn run(self) -> anyhow::Result<()> {
         use futures::StreamExt;
 
         log::info!("Starting up the server...");
@@ -205,5 +209,11 @@ impl<'a> AOServer<'a> {
                 }
             }));
         }
+    }
+
+    pub async fn handle_handshake(self, hdid: String) {
+        let db_pool = self.db_pool.lock().unwrap();
+        // do smth with db_pool
+        println!("Hanshake from hdid = {}!", hdid);
     }
 }
