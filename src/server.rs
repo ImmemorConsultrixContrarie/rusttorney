@@ -1,6 +1,7 @@
 use crate::{config::Config, networking::Command};
 use bytes::{Buf, Bytes, BytesMut};
 use futures::FutureExt;
+use sqlx::sqlite::SqlitePool;
 use std::{
     borrow::{BorrowMut, Cow},
     char::REPLACEMENT_CHARACTER,
@@ -9,9 +10,8 @@ use std::{
     marker::PhantomData,
     str,
     str::FromStr,
-    sync::Mutex
+    sync::{Arc, Mutex},
 };
-use sqlx::sqlite::SqlitePool;
 use tokio::{io::AsyncReadExt, net::TcpListener, stream::StreamExt};
 use tokio_util::codec::{Decoder, FramedRead};
 
@@ -78,7 +78,8 @@ impl Command for ClientCommand {
         {
             args.next()
                 .ok_or_else(on_err)
-                .map(|s| s.parse::<T>().map_err(|e| anyhow::anyhow!("{}", e))).flatten()
+                .map(|s| s.parse::<T>().map_err(|e| anyhow::anyhow!("{}", e)))
+                .flatten()
         }
 
         match name.as_str() {
@@ -88,7 +89,7 @@ impl Command for ClientCommand {
                     return Err(on_err());
                 }
                 res
-            },
+            }
             _ => Err(on_err()),
         }
     }
@@ -172,15 +173,15 @@ fn ignore_ill_utf8(v: &[u8]) -> String {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct AOServer<'a> {
-    config: &'a Config<'a>,
-    db_pool: &'a Mutex<SqlitePool>
+#[derive(Clone)]
+pub struct AOServer {
+    config: Arc<Config>,
+    db_pool: SqlitePool,
 }
 
-impl<'a> AOServer<'a> {
-    pub fn new(config: &'a Config<'a>, db_pool: &'a Mutex<SqlitePool>) -> anyhow::Result<Self> {
-        Ok(Self { config, db_pool })
+impl AOServer {
+    pub fn new(config: Config, db_pool: SqlitePool) -> anyhow::Result<Self> {
+        Ok(Self { config: Arc::new(config), db_pool })
     }
 
     pub async fn run(self) -> anyhow::Result<()> {
@@ -198,13 +199,19 @@ impl<'a> AOServer<'a> {
 
             let msg_stream = AOMessageCodec.framed(socket);
 
-            tokio::spawn(msg_stream.for_each(|msg| async {
+            tokio::spawn(msg_stream.for_each(|msg| async move {
                 match msg {
                     Ok(msg) => {
-                        log::debug!("Got message: {:?}", msg)
-                    },
+                        log::debug!("Got message: {:?}", msg);
+                        match msg {
+                            ClientCommand::Handshake(hdid) => {
+                                self.clone().handle_handshake(hdid);
+                            }
+                            _ => println!("Unknown ClientCommand"),
+                        };
+                    }
                     Err(err) => {
-                        log::error!("Got error: {:?}", err)
+                        log::error!("Got error: {:?}", err);
                     }
                 }
             }));
@@ -212,7 +219,7 @@ impl<'a> AOServer<'a> {
     }
 
     pub async fn handle_handshake(self, hdid: String) {
-        let db_pool = self.db_pool.lock().unwrap();
+        let db_pool = self.db_pool;
         // do smth with db_pool
         println!("Hanshake from hdid = {}!", hdid);
     }
